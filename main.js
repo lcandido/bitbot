@@ -1,10 +1,10 @@
 'use strict';
 
-var config = require('./config');
+var settings = require('./config');
 const binance = require('node-binance-api');
 binance.options({
-  'APIKEY': config.binance.apiKey,
-  'APISECRET': config.binance.secretKey
+  'APIKEY': settings.binance.apiKey,
+  'APISECRET': settings.binance.secretKey
 });
 
 
@@ -12,12 +12,10 @@ var AWS = require('aws-sdk');
 // AWS.config.update({ region: "sa-east-1" });
 // var dyn = new AWS.DynamoDB({ endpoint: new AWS.Endpoint('http://localhost:8000') });
 AWS.config.update({ 
-    accessKeyId: config.aws.accessKeyId, 
-    secretAccessKey: config.aws.secretAccessKey, 
+    accessKeyId: settings.aws.accessKeyId, 
+    secretAccessKey: settings.aws.secretAccessKey, 
     region: 'sa-east-1'
 });
-
-var gauss = require('gauss');
 
 var dyn = new AWS.DynamoDB({apiVersion: '2012-08-10'});
 
@@ -35,6 +33,8 @@ var timeoutCheck = 30000;
 var timeoutMonitor = 60000;
 var timeoutConfig = 60000;
 var numberOfKandles = 25;
+var debug = false;
+var version = 9;
 
 var config = function () {
     var params = {
@@ -55,6 +55,7 @@ var config = function () {
             timeoutCheck = parseInt(data.Item.timeoutCheck.N);
             timeoutMonitor = parseInt(data.Item.timeoutMonitor.N);
             numberOfKandles = parseInt(data.Item.numberOfKandles.N);
+            debug = data.Item.debug.BOOL;
 
             setTimeout(config, timeoutConfig);
 
@@ -70,6 +71,7 @@ var coin = {
     minGain : 0.00,
     maxGain : 0.00,
     maxLoss : 0.00,
+    fee : 0.05,
     // coin exchange variables
     status : '',
     baseAsset: '',
@@ -128,7 +130,7 @@ var saveGain = function (coin) {
         var totalSell = (coin.asks[0].value * coin.asks[0].qty) + (coin.asks[1].value * coin.asks[1].qty);
                             
         var gain = totalSell - totalBuy;
-        var fee = ((totalSell * 0.0005) + (totalBuy * 0.0005)) * -1;
+        var fee = ((totalSell * (coin.fee / 100)) + (totalBuy * (coin.fee / 100))) * -1;
         var net = gain + fee;
     
         var params = {
@@ -141,7 +143,8 @@ var saveGain = function (coin) {
               'askTotal' : {N: totalSell.toFixed(coin.price.tickPlaces)},
               'grossGain' : {N: gain.toFixed(coin.price.tickPlaces)},
               'fee' : {N: fee.toFixed(coin.price.tickPlaces)},
-              'netGain' : {N: net.toFixed(coin.price.tickPlaces)}
+              'netGain' : {N: net.toFixed(coin.price.tickPlaces)},
+              'version' : {N: version.toString()}
             }
         };
           
@@ -604,6 +607,7 @@ var bitbot = function (coin) {
                 coin.minGain = parseFloat(data.Item.minGain.N);
                 coin.maxGain = parseFloat(data.Item.maxGain.N);
                 coin.maxLoss = parseFloat(data.Item.maxLoss.N);
+                coin.fee = parseFloat(data.Item.fee.N);
 
                 var pause = parseInt(data.Item.pause.N);
                 if (pause) {
@@ -719,9 +723,9 @@ var GetMarketInfo = function (symbol, interval, callback) {
         }
 
         var vec = close.toVector();
-        var arrEma10 = vec.ema(10);
-        var arrEma30 = vec.ema(30);
-        var arrEma60 = vec.ema(60);
+        var arrEma10 = vec.ema(7);
+        var arrEma30 = vec.ema(25);
+        var arrEma60 = vec.ema(90);
 
         var ema10 = arrEma10[arrEma10.length-1];
         var ema30 = arrEma30[arrEma30.length-1];
@@ -757,13 +761,15 @@ var monitor2 = {
                     bitbot(coin); 
                 }
 
-                console.log(
-                    new Date().toISOString() + '\t' +
-                    ema60.toFixed(2) + '\t' +
-                    ema30.toFixed(2) + '\t' +
-                    ema10.toFixed(2) + '\t' +
-                    price.toFixed(2) + '\t' +
-                    monitor2.direction);
+                if (debug) {
+                    console.log(
+                        new Date().toISOString() + '\t' +
+                        ema60.toFixed(2) + '\t' +
+                        ema30.toFixed(2) + '\t' +
+                        ema10.toFixed(2) + '\t' +
+                        price.toFixed(2) + '\t' +
+                        monitor2.direction);
+                }
     
                 setTimeout(monitor2.init, timeoutMonitor, coin);
 

@@ -17,19 +17,15 @@ AWS.config.update({
     region: 'sa-east-1'
 });
 
-var gauss = require('gauss');
-
 var dyn = new AWS.DynamoDB({apiVersion: '2012-08-10'});
 
 var timeoutOrder = 10000;
 var timeoutCheck = 30000;
-var timeoutMonitor = 30000;
+var timeoutMonitor = 60000;
 var timeoutConfig = 60000;
-var numberOfKandles = 10;
+var numberOfKandles = 25;
 var debug = false;
-// var emaL = 90;
-// var emaM = 25;
-// var emaS = 7;
+var version = 13;
 
 var config = function () {
     var params = {
@@ -51,9 +47,6 @@ var config = function () {
             timeoutMonitor = parseInt(data.Item.timeoutMonitor.N);
             numberOfKandles = parseInt(data.Item.numberOfKandles.N);
             debug = data.Item.debug.BOOL;
-            // emaL = parseInt(data.Item.emaL.N);
-            // emaM = parseInt(data.Item.emaM.N);
-            // emaS = parseInt(data.Item.emaS.N);
 
             setTimeout(config, timeoutConfig);
 
@@ -141,7 +134,8 @@ var saveGain = function (coin) {
               'askTotal' : {N: totalSell.toFixed(coin.price.tickPlaces)},
               'grossGain' : {N: gain.toFixed(coin.price.tickPlaces)},
               'fee' : {N: fee.toFixed(coin.price.tickPlaces)},
-              'netGain' : {N: net.toFixed(coin.price.tickPlaces)}
+              'netGain' : {N: net.toFixed(coin.price.tickPlaces)},
+              'version' : {N: version}
             }
         };
           
@@ -651,9 +645,7 @@ var bitbot = function (coin) {
                             doBid(coin, coin.bids[0], function() {});
 
                             log(coin, 'buying', 'qty: ' + coin.bids[0].qty.toFixed(coin.lot.stepPlaces) + 
-                                ' bid: ' + coin.bids[0].value.toFixed(coin.price.tickPlaces) +
-                                ' ask1: ' + coin.asks[0].value.toFixed(coin.price.tickPlaces) +
-                                ' ask2: ' + coin.asks[1].value.toFixed(coin.price.tickPlaces));
+                                ' value: ' + coin.bids[0].value.toFixed(coin.price.tickPlaces));
 
                         } else if (monitor2.direction == 'sell') {
 
@@ -678,9 +670,7 @@ var bitbot = function (coin) {
                             doAsk(coin, coin.asks[0], function() {});
 
                             log(coin, 'selling', 'qty: '+coin.asks[0].qty.toFixed(coin.lot.stepPlaces) + 
-                                ' ask: '+coin.asks[0].value.toFixed(coin.price.tickPlaces) +
-                                ' bid1: ' + coin.bids[0].value.toFixed(coin.price.tickPlaces) +
-                                ' bid2: ' + coin.bids[1].value.toFixed(coin.price.tickPlaces));
+                                ' value: '+coin.asks[0].value.toFixed(coin.price.tickPlaces));
 
                         } else {
                             // log(coin, 'trading', 'direction: '+direction);
@@ -703,36 +693,31 @@ var GetMarketInfo = function (symbol, interval, callback) {
 
     binance.candlesticks(symbol, interval, function(klines) {
 
-        var avgs = 0.00;
-
-//        var close = [];
+        var kline = 0.00;
+        var avg = 0.00;
+        var top = 0.00;
+        var bottom = 999999999.99;
 
         for (var i=0; i<klines.length; i++) {
 
-            var high = parseFloat(klines[i][2]);
-            var low = parseFloat(klines[i][3]);
-            var avg = (high + low) / 2;
+            kline = parseFloat(klines[i][4]);
+            avg += kline;
 
-//            kline = parseFloat(klines[i][4]);
-//            close[i] = kline;
-            avgs += avg;
+            if (kline > top) {
+                top = kline;
+            }
+
+            if (kline < bottom) {
+                bottom = kline;
+            }
         }
 
-        avgs /= 10;
+        avg /= numberOfKandles;
 
-        // var vec = close.toVector();
-        // var arrEmaS = vec.ema(emaS);
-        // var arrEmaM = vec.ema(emaM);
-//        var arrEmaL = vec.ema(emaL);
+        callback(avg, bottom, top);
 
-        // var retEmaS = arrEmaS[arrEmaS.length-1];
-        // var retEmaM = arrEmaM[arrEmaM.length-1];
-//        var retEmaL = arrEmaL[arrEmaL.length-1];
-        // var retEmaL = 0;
+    }, {'limit' : numberOfKandles} );
 
-        callback(avgs);
-
-    }, {'limit' : 10} );
 }
 
 var monitor2 = {
@@ -741,38 +726,43 @@ var monitor2 = {
 
         var symbol = coin.symbol;
 
-        GetMarketInfo(symbol, '1m', function (avgs) {
+        GetMarketInfo(symbol, '15m', function (movingAvg15m, bottom15m, top15m) {
 
-            // GetMarketInfo(symbol, '5m', function (emaS5m, emaM5m, emaL5m) {
+            GetMarketInfo(symbol, '5m', function (movingAvg5m, bottom5m, top5m) {
+
+                GetMarketInfo(symbol, '1m', function (movingAvg1m, bottom1m, top1m) {
+
+                    binance.price(symbol, function(price) {
+
+                        var price = parseFloat(price.price);
+
+                        if ((movingAvg15m * 1.001) < movingAvg5m && (movingAvg5m * 1.001) < movingAvg1m && (movingAvg1m * 1.001) < price) {
+                            monitor2.direction = 'buy';
+                        } else if ((movingAvg15m / 1.001) > movingAvg5m && (movingAvg5m / 1.001) > movingAvg1m && (movingAvg1m / 1.001) > price) {
+                            monitor2.direction = 'sell';
+                        } else {
+                            monitor2.direction = 'nothing';
+                        }
+
+                        // if (!coin.init) { 
+                        //     bitbot(coin); 
+                        // }
+
+                        if (debug) {
+                            console.log(
+                                new Date().toISOString() + '\t' +
+                                movingAvg15m.toFixed(2) + '\t' +
+                                movingAvg5m.toFixed(2) + '\t' +
+                                movingAvg1m.toFixed(2) + '\t' +
+                                price.toFixed(2) + '\t' +
+                                monitor2.direction);
+                        }
             
-                binance.price(symbol, function(price) {
+                        setTimeout(monitor2.init, timeoutMonitor, coin);
 
-                    var price = parseFloat(price.price);
-
-                    if ((avgs * 1.005) < price) {
-                        monitor2.direction = 'buy';
-                    } else if ((avgs / 1.005) > price) {
-                        monitor2.direction = 'sell';
-                    } else {
-                        monitor2.direction = 'nothing';
-                    }
-
-                    if (!coin.init) { 
-                        bitbot(coin); 
-                    }
-
-                    if (debug) {
-                        console.log(
-                            new Date().toISOString() + '\t' +
-                            avgs.toFixed(2) + '\t' +
-                            price.toFixed(2) + '\t' +
-                            monitor2.direction);
-                    }
-        
-                    setTimeout(monitor2.init, timeoutMonitor, coin);
-
+                    });
                 });
-            // });
+            });
         });
 
     }    

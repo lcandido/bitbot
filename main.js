@@ -24,8 +24,8 @@ var timeoutCheck = 30000;
 var timeoutMonitor = 60000;
 var timeoutConfig = 60000;
 var numberOfKandles = 15;
-var debug = false;
-var version = 14;
+var debug = true;
+var version = 15;
 
 var config = function () {
     var params = {
@@ -59,9 +59,7 @@ var coin = {
     // coin specific variables
     symbol : '',
     quantity : 0.00,
-    minGain : 0.00,
-    maxGain : 0.00,
-    maxLoss : 0.00,
+    gain : 0.00,
     fee : 0.05,
     // coin exchange variables
     status : '',
@@ -77,32 +75,16 @@ var coin = {
         tickSize: 0.0, 
         tickPlaces: 0 
     },
-    bids : [{
+    bid : {
         id : '',
         qty : 0.00,
         value : 0.0000 
-    }, {
-        id : '',
-        qty: 0.00,
-        value: 0.0000
-    }],
-    asks : [{
+    },
+    ask : {
         id : '',
         qty : 0.00,
         value : 0.0000 
-    }, {
-        id : '',
-        qty: 0.00,
-        value: 0.0000
-    }],
-    // commom variables
-    // qty : 0.00,
-    // bidOpen : false,
-    // askOpen : false,
-    // bidValue : 0.0000,
-    // askValue : 0.0000,
-    // bidOrderId : '',
-    // askOrderId : '',
+    },
     done : 0,
     init : false,
     trading : false,
@@ -115,15 +97,15 @@ var log = function (type, message = '') {
     console.log(now.toISOString()+' ('+type+') '+message);
 }
 
-var saveGain = function (coin) {
+var saveGain = function () {
 
     try {
-        var totalBuy = (coin.bids[0].value * coin.bids[0].qty) + (coin.bids[1].value * coin.bids[1].qty);
-        var totalSell = (coin.asks[0].value * coin.asks[0].qty) + (coin.asks[1].value * coin.asks[1].qty);
+        var totalBought = coin.bid.value * coin.bid.qty;
+        var totalSold = coin.ask.value * coin.ask.qty;
                             
-        var gain = totalSell - totalBuy;
-        var fee = ((totalSell * (coin.fee / 100)) + (totalBuy * (coin.fee / 100))) * -1;
-        var net = gain + fee;
+        var realGain = totalSold - totalBought;
+        var totalFee = ((totalSold * (coin.fee / 100)) + (totalBought * (coin.fee / 100))) * -1;
+        var net = realGain + totalFee;
 
         var now = new Date();
         now.setHours(now.getHours() - 3);
@@ -134,10 +116,10 @@ var saveGain = function (coin) {
               'datetime' : {S: now.toISOString()},
               'symbol' : {S: coin.symbol},
               'qty' : {N: coin.quantity.toFixed(coin.lot.stepPlaces)},
-              'bidTotal' : {N: totalBuy.toFixed(coin.price.tickPlaces)},
-              'askTotal' : {N: totalSell.toFixed(coin.price.tickPlaces)},
-              'grossGain' : {N: gain.toFixed(coin.price.tickPlaces)},
-              'fee' : {N: fee.toFixed(coin.price.tickPlaces)},
+              'bidTotal' : {N: totalBought.toFixed(coin.price.tickPlaces)},
+              'askTotal' : {N: totalSold.toFixed(coin.price.tickPlaces)},
+              'grossGain' : {N: realGain.toFixed(coin.price.tickPlaces)},
+              'fee' : {N: totalFee.toFixed(coin.price.tickPlaces)},
               'netGain' : {N: net.toFixed(coin.price.tickPlaces)},
               'version' : {N: version.toString()}
             }
@@ -159,230 +141,125 @@ var saveGain = function (coin) {
 
 }
 
-var hasNewBid = function (coin, bid, myBidPrice, callback) {
-
-    if (coin.done == 0) {
-
-        if (myBidPrice == bid.value) { return; }
-        myBidPrice += coin.price.tickSize;
-
-        bid.value = myBidPrice;
-
-        coin.asks[0].value = myBidPrice * (1 + (coin.minGain / 100));
-        coin.asks[1].value = coin.asks[0].value * (1 + (coin.maxGain / 100));
-
-        callback('new_bid');
-        return;
-
-    } else if (coin.done == 1) {
-
-        myBidPrice += coin.price.tickSize;
-
-        var loss = ((coin.asks[0].value / myBidPrice) - 1) * -100;
-        if (loss >= coin.maxLoss) {
-            bid.value = myBidPrice;
-            bid.qty = coin.quantity;
-            coin.bids[1].value = 0;
-            callback('new_bid');
-        }
-    } else if (coin.done == 2) {
-
-        myBidPrice += coin.price.tickSize;
-
-        var loss = ((coin.bids[0].value / myBidPrice) - 1) * -100;
-        if (loss >= coin.maxLoss) {
-            bid.value = myBidPrice;
-            callback('new_bid');
-        }
-    }
-}
-
-var checkBid = function (coin, bid) {
+var checkBid = function () {
 
     if (!coin.trading) { return; }
 
-    binance.orderStatus(coin.symbol, bid.id, function(json) {
+    binance.orderStatus(coin.symbol, coin.bid.id, function(json) {
 
         try {
             
             if (!json) { throw new Error('Invalid API order status json'); }
 
             if (json.status == 'FILLED') {
-
-                bid.value = parseFloat(json.price);
                 
                 coin.done++;
                 log('BOUGHT', 
-                    'qty: ' + bid.qty.toFixed(coin.lot.stepPlaces) +
-                    ' value: ' + bid.value.toFixed(coin.price.tickPlaces));
+                    'qty: ' + coin.bid.qty.toFixed(coin.lot.stepPlaces) +
+                    ' value: ' + coin.bid.value.toFixed(coin.price.tickPlaces));
 
                 if (coin.done == 1) {
-                    doAsk(coin, coin.asks[0], function() {});
+                    doAsk(function() {});
                 }
                 else if (coin.done == 2) {
-                    if (coin.bids[1].value > 0) {
-                        doBid(coin, coin.bids[1], function() {});
-                    } else {
-                        saveGain(coin);
-                    }
+                    saveGain();
                 }
-                else if (coin.done == 3) {
-                    saveGain(coin);
-                    // coin.bidOpen = false;
-
-                }
-
-            } else if (json.status == 'PARTIALLY_FILLED') {
-
-                setTimeout(checkBid, timeoutOrder, coin, bid);
-                return;
-                // log('* BOUGHT PART', 'qty: '+coin.bidPartialQty.toFixed(coin.lot.stepPlaces)+' value: '+coin.bidValue.toFixed(coin.price.tickPlaces));
 
             } else {
 
-                binance.bookTicker(coin.symbol, function(bookTicker, symbol)  {
-                
-                    try {
+                setTimeout(checkBid, timeoutOrder);
 
-                        if (!bookTicker) { throw new Error('Invalid API bookTicker'); }
-                        if ( typeof bookTicker.msg !== "undefined" ) { throw new Error('Invalid API bookTicker'); }
-                        
-                        var bidPrice = parseFloat(bookTicker.bidPrice);
+            } 
 
-                        hasNewBid(coin, bid, bidPrice, function (action) {
-
-                            if (action == 'new_bid') {
-
-                                binance.cancel(coin.symbol, bid.id, function(cancel, symbol) {
-
-                                    try {                                        
-                                        if (!cancel) { throw new Error('Invalid API cancel response'); }
-                                        if ( typeof cancel.msg !== "undefined" ) { throw new Error(cancel.msg); }
-                                        
-                                        binance.buy(coin.symbol, bid.qty.toFixed(coin.lot.stepPlaces), bid.value.toFixed(coin.price.tickPlaces), {}, function(buy) {
-    
-                                            try {
-                                                if (!buy) { throw new Error('Invalid API buy response'); }
-                                                if ( typeof buy.msg !== "undefined" ) { throw new Error(buy.msg); }
-    
-                                                bid.id = buy.orderId;
-                                                if (bid.id == 'undefined') { throw new Error('Invalid bid order Id'); }
-                                                
-                                                // coin.bidOpen = true;
-    
-                                            } catch (error) {
-                                                log('error', 'checkBid.buy qty: '+bid.qty.toFixed(coin.lot.stepPlaces)+' value: '+bid.value.toFixed(coin.price.tickPlaces)+' error: '+error.message);
-                                            }
-                                        });
-    
-                                    } catch (error) {
-                                        if (!cancel && typeof cancel.msg !== "undefined" && cancel.msg != 'UNKNOWN_ORDER') {
-                                            log('error', 'checkBid.cancel bid order ' + bid.id + 
-                                                ' qty: ' + bid.qty.toFixed(coin.lot.stepPlaces) + 
-                                                ' value: ' + bid.value.toFixed(coin.price.tickPlaces) + 
-                                                ' error: ' + error.message);
-                                        }
-                                    }
-                                });
-                            }
-
-                        });
-
-                        setTimeout(checkBid, timeoutOrder, coin, bid);
-
-                    } catch (error) {
-                        log('error', 'checkBid.bookTicker() error: ' + error.message);
-                        setTimeout(checkBid, timeoutOrder, coin, bid);
-                    }
-
-                });
-
-            }
         } catch (error) {
-            log('error', 'checkBid.orderStatus() bid order ' + bid.id +
+            log('error', 'checkBid.orderStatus() bid order ' + coin.bid.id +
                 ' error: ' + error.message);
 
-            setTimeout(checkBid, timeoutOrder, coin, bid);
+            setTimeout(checkBid, timeoutOrder);
         }
     });
 
 }
 
-var doBid = function (coin, bid, callback) {
+var doBid = function (callback) {
 
     if (!coin.trading) { return; }
-
-    // Send bid order
-    binance.buy(coin.symbol, bid.qty.toFixed(coin.lot.stepPlaces), bid.value.toFixed(coin.price.tickPlaces), {}, function(response) {
-        
-        try {
-            
-            if (!response) { throw new Error('Invalid API buy response'); }
-            if ( typeof response.msg !== "undefined" ) { throw new Error(response.msg); }
-
-            bid.id = response.orderId;
-            if (bid.id == 'undefined') { throw new Error('Invalid bid order Id'); }
-
-            // log('started', 'bid order '+coin.bidOrderId+' qty: '+coin.qty.toFixed(coin.lot.stepPlaces)+' value: '+coin.bidValue.toFixed(coin.price.tickPlaces));
-
-            callback();
-
-            checkBid(coin, bid);
-
-        } catch (error) {
-            // coin.bidOpen = false;
-            log('error', 'doBid() qty: '+bid.qty.toFixed(coin.lot.stepPlaces)+' value: '+bid.value.toFixed(coin.price.tickPlaces)+' error: '+error.message);
-        }
-    });
-
-}
-
-
-var hasNewAsk = function (coin, ask, myAskPrice, callback) {
 
     if (coin.done == 0) {
 
-        if (myAskPrice == ask.value) { return; }
-        myAskPrice -= coin.price.tickSize;
+        binance.marketBuy(
+            coin.symbol, 
+            coin.bid.qty.toFixed(coin.lot.stepPlaces), 
+            {newOrderRespType : 'FULL'}, 
+            function(response) {
 
-        ask.value = myAskPrice;
+            try {
+            
+                if (!response) { throw new Error('Invalid API buy response'); }
+                if ( typeof response.msg !== "undefined" ) { throw new Error(response.msg); }
+                if ( typeof response.fills !== "undefined" ) { 
+                    var price = 0, quantity = 0, totalPrice = 0, totalQuantity = 0;
+                    for (var i=0; i<response.fills.length; i++) {
+                        price = parseFloat(response.fills[i].price);
+                        quantity = parseFloat(response.fills[i].qty);
+                        totalPrice += price * quantity;
+                        totalQuantity += quantity;
+                    }
+                    coin.bid.value = totalPrice / totalQuantity;
+                    coin.ask.value = coin.bid.value * (1 + (coin.gain / 100));
+                }
 
-        coin.bids[0].value = myAskPrice / (1 + (coin.minGain / 100));
-        coin.bids[1].value = coin.bids[0].value / (1 + (coin.maxGain / 100));
+                coin.bid.id = response.orderId;
+                if (coin.bid.id == 'undefined') { throw new Error('Invalid bid order Id'); }
+    
+                callback();
+    
+                checkBid();
+    
+            } catch (error) {
+                log('error', 
+                    'doBid().marketBuy qty: ' + coin.bid.qty.toFixed(coin.lot.stepPlaces) + 
+                    ' value: ' + coin.bid.value.toFixed(coin.price.tickPlaces) + 
+                    ' error: ' + error.message);
+            }
+    
+        });
 
-        callback('new_ask');
-        return;
+    } else {
 
-    } else if (coin.done == 1) {
+         // Send bid order
+        binance.buy(coin.symbol, 
+            coin.bid.qty.toFixed(coin.lot.stepPlaces), 
+            coin.bid.value.toFixed(coin.price.tickPlaces), {}, function(response) {
+            
+            try {
+                
+                if (!response) { throw new Error('Invalid API buy response'); }
+                if ( typeof response.msg !== "undefined" ) { throw new Error(response.msg); }
 
-        myAskPrice -= coin.price.tickSize;
+                coin.bid.id = response.orderId;
+                if (coin.bid.id == 'undefined') { throw new Error('Invalid bid order Id'); }
 
-        var loss = ((myAskPrice / coin.bids[0].value) - 1) * -100;
-        if (loss >= coin.maxLoss) {
-            ask.value = myAskPrice;
-            ask.qty = coin.quantity;
-            coin.asks[1].value = 0;
-            callback('new_ask');
-        }
+                callback();
 
-    } else if (coin.done == 2) {
+                checkBid();
 
-        myAskPrice -= coin.price.tickSize;
-
-        var loss = ((myAskPrice / coin.asks[0].value) - 1) * -100;
-        if (loss >= coin.maxLoss) {
-            ask.value = myAskPrice;
-            callback('new_ask');
-        }
-
+            } catch (error) {
+                log('error', 
+                    'doBid().buy qty: ' + coin.bid.qty.toFixed(coin.lot.stepPlaces) + 
+                    ' value: ' + coin.bid.value.toFixed(coin.price.tickPlaces) + 
+                    ' error: ' + error.message);
+            }
+        });
     }
+
 }
 
-var checkAsk = function (coin, ask) {
+var checkAsk = function () {
 
     if (!coin.trading) { return; }
 
-    binance.orderStatus(coin.symbol, ask.id, function(json) {
+    binance.orderStatus(coin.symbol, coin.ask.id, function(json) {
 
         try {
 
@@ -390,131 +267,109 @@ var checkAsk = function (coin, ask) {
 
             if (json.status == 'FILLED') {
 
-                ask.value = parseFloat(json.price);
-
                 coin.done++;
-                log('SOLD', 'qty: ' + ask.qty.toFixed(coin.lot.stepPlaces) + 
-                    ' value: ' + ask.value.toFixed(coin.price.tickPlaces));
+                log('SOLD', 'qty: ' + coin.ask.qty.toFixed(coin.lot.stepPlaces) + 
+                    ' value: ' + coin.ask.value.toFixed(coin.price.tickPlaces));
 
                 if (coin.done == 1) {
-                    doBid(coin, coin.bids[0], function() {});
+                    doBid(function() {});
                 }
                 else if (coin.done == 2) {
-                    if (coin.asks[1].value > 0) {
-                        doAsk(coin, coin.asks[1], function() {});
-                    } else {
-                        saveGain(coin);
-                    }
+                    saveGain();
                 }
-                else if (coin.done == 3) {
-                    saveGain(coin);
-                }
-
-            } else if (json.status == 'PARTIALLY_FILLED') {
-
-                setTimeout(checkAsk, timeoutOrder, coin, ask);
-                return;
-                // log('* SOLD PART', 'qty: '+coin.askPartialQty.toFixed(coin.lot.stepPlaces)+' value: '+coin.askValue.toFixed(coin.price.tickPlaces));
 
             } else {
 
-                binance.bookTicker(coin.symbol, function(bookTicker, symbol)  {
-                
-                    try {
-
-                        if (!bookTicker) { throw new Error('Invalid API bookTicker'); }
-                        if ( typeof bookTicker.msg !== "undefined" ) { throw new Error('Invalid API bookTicker'); }
-
-                        var askPrice = parseFloat(bookTicker.askPrice);
-
-                        hasNewAsk(coin, ask, askPrice, function (action) {
-
-                            if (action == 'new_ask') {
-
-                                binance.cancel(coin.symbol, ask.id, function(cancel, symbol) {
-
-                                    try {
-                                        if (!cancel) { throw new Error('Invalid API cancel response'); }
-                                        if ( typeof cancel.msg !== "undefined" ) { throw new Error(cancel.msg); }
-                                        
-                                        binance.sell(coin.symbol, ask.qty.toFixed(coin.lot.stepPlaces), ask.value.toFixed(coin.price.tickPlaces), {}, function(sell) {
-    
-                                            try {
-                                                if (!sell) { throw new Error('Invalid API sell response'); }
-                                                if ( typeof sell.msg !== "undefined" ) { throw new Error(sell.msg); }
-    
-                                                ask.id = sell.orderId;
-                                                if (ask.id == 'undefined') { throw new Error('Invalid ask order Id'); }
-                                                
-                                                // coin.askOpen = true;
-    
-                                            } catch (error) {
-                                                log('error', 'checkAsk.sell() qty: '+ask.qty.toFixed(coin.lot.stepPlaces)+' value: '+ask.value.toFixed(coin.price.tickPlaces)+' error: '+error.message);
-                                            }
-                                        });
-    
-                                    } catch (error) {
-                                        if (!cancel && typeof cancel.msg !== "undefined" && cancel.msg != 'UNKNOWN_ORDER') {
-                                            log('error', 'checkAsk.cancel() ask order ' + ask.id + 
-                                                ' qty: ' + ask.qty.toFixed(coin.lot.stepPlaces) + 
-                                                ' value: ' + ask.value.toFixed(coin.price.tickPlaces) + 
-                                                ' error: ' + error.message);
-                                        }
-                                    }
-                                });
-                            } 
-
-                        });
-
-                        setTimeout(checkAsk, timeoutOrder, coin, ask);
-
-
-                    } catch (error) {
-                        log('error', 'checkAsk.bookTicker() error: '+error.message);
-                        setTimeout(checkAsk, timeoutOrder, coin, ask);
-                    }
-
-                });
+                setTimeout(checkAsk, timeoutOrder);
 
             }
 
         } catch (error) {
-            log('error', 'checkAsk.orderStatus ask order ' + ask.id + 
+            log('error', 'checkAsk.orderStatus ask order ' + coin.ask.id + 
                 ' error: '+error.message);
 
-            setTimeout(checkAsk, timeoutOrder, coin, ask);
+            setTimeout(checkAsk, timeoutOrder);
         }
     });
 
 }  
 
-var doAsk = function (coin, ask, callback) {
+var doAsk = function (callback) {
 
     if (!coin.trading) { return; }
 
-    // Send ask order
-    binance.sell(coin.symbol, ask.qty.toFixed(coin.lot.stepPlaces), ask.value.toFixed(coin.price.tickPlaces), {}, function(response) {
-        
-        try {
+    if (coin.done == 0) {
 
-            if (!response) { throw new Error('Invalid API sell response'); }
-            if ( typeof response.msg !== "undefined" ) { throw new Error(response.msg); }
+        // Send ask order
+        binance.marketSell(
+            coin.symbol, 
+            coin.ask.qty.toFixed(coin.lot.stepPlaces), 
+            {newOrderRespType : 'FULL'}, 
+            function(response) {
             
-            ask.id = response.orderId;
-            if (ask.id == 'undefined') { throw new Error('Invalid ask order Id'); }
+            try {
 
-            // log('started', 'ask order '+coin.askOrderId+' qty: '+coin.qty.toFixed(coin.lot.stepPlaces)+' value: '+coin.askValue.toFixed(coin.price.tickPlaces));
+                if (!response) { throw new Error('Invalid API sell response'); }
+                if ( typeof response.msg !== "undefined" ) { throw new Error(response.msg); }
+                if ( typeof response.fills !== "undefined" ) { 
+                    var price = 0, quantity = 0, totalPrice = 0, totalQuantity = 0;
+                    for (var i=0; i<response.fills.length; i++) {
+                        price = parseFloat(response.fills[i].price);
+                        quantity = parseFloat(response.fills[i].qty);
+                        totalPrice += price * quantity;
+                        totalQuantity += quantity;
+                    }
+                    coin.ask.value = totalPrice / totalQuantity;
+                    coin.bid.value = coin.ask.value / (1 + (coin.gain / 100));
+                }
 
-            callback();
+                coin.ask.id = response.orderId;
+                if (coin.ask.id == 'undefined') { throw new Error('Invalid ask order Id'); }
 
-            checkAsk(coin, ask);
+                callback();
+
+                checkAsk();
+                
+            } catch (error) {
+                // coin.askOpen = false;
+                log('error', 
+                    'doAsk().marketSell qty: ' + coin.ask.qty.toFixed(coin.lot.stepPlaces) +
+                    ' value: ' + coin.ask.value.toFixed(coin.price.tickPlaces) + 
+                    ' error: ' + error.message);
+            }
+
+        });
+    } else {
+
+        // Send ask order
+        binance.sell(coin.symbol, 
+            coin.ask.qty.toFixed(coin.lot.stepPlaces), 
+            coin.ask.value.toFixed(coin.price.tickPlaces), {}, function(response) {
             
-        } catch (error) {
-            // coin.askOpen = false;
-            log('error', 'doAsk() qty: '+ask.qty.toFixed(coin.lot.stepPlaces)+' value: '+ask.value.toFixed(coin.price.tickPlaces)+' error: '+error.message);
-        }
+            try {
 
-    });
+                if (!response) { throw new Error('Invalid API sell response'); }
+                if ( typeof response.msg !== "undefined" ) { throw new Error(response.msg); }
+                
+                coin.ask.id = response.orderId;
+                if (coin.ask.id == 'undefined') { throw new Error('Invalid ask order Id'); }
+
+                callback();
+
+                checkAsk();
+                
+            } catch (error) {
+                // coin.askOpen = false;
+                log('error', 
+                    'doAsk().sell qty: ' + coin.ask.qty.toFixed(coin.lot.stepPlaces) +
+                    ' value: ' + coin.ask.value.toFixed(coin.price.tickPlaces) + 
+                    ' error: ' + error.message);
+            }
+
+        });
+    }
+
+
             
 }
 
@@ -529,7 +384,7 @@ function decimalPlaces(num) {
          - (match[2] ? +match[2] : 0));
   }
 
-var bitbot = function (coin) {
+var bitbot = function () {
 
     if (!coin.init) {
 
@@ -567,7 +422,7 @@ var bitbot = function (coin) {
 
                 coin.init = true;
 
-                setTimeout(bitbot, timeoutCheck, coin);
+                setTimeout(bitbot, timeoutCheck);
 
             } catch (error) {
                 log('error', 'bitbot.exchangeInfo '+error.message);
@@ -577,7 +432,7 @@ var bitbot = function (coin) {
     } else {
 
         if (coin.trading) {
-            setTimeout(bitbot, timeoutCheck, coin);
+            setTimeout(bitbot, timeoutCheck);
             return;
         }
 
@@ -599,15 +454,13 @@ var bitbot = function (coin) {
 
                 if (coin.quantity < coin.lot.minQty || coin.quantity > coin.lot.maxQty) { throw new Error('invalid qty value: '+coin.quantity); }
 
-                coin.minGain = parseFloat(data.Item.minGain.N);
-                coin.maxGain = parseFloat(data.Item.maxGain.N);
-                coin.maxLoss = parseFloat(data.Item.maxLoss.N);
+                coin.gain = parseFloat(data.Item.maxGain.N);
                 coin.fee = parseFloat(data.Item.fee.N);
 
                 var pause = parseInt(data.Item.pause.N);
                 if (pause) {
                     log('pause');
-                    setTimeout(bitbot, timeoutCheck, coin);
+                    setTimeout(bitbot, timeoutCheck);
                     return;
                 }
 
@@ -630,61 +483,43 @@ var bitbot = function (coin) {
 
                             coin.trading = true;
 
-                            coin.bids[0].qty = coin.quantity;
-                            coin.bids[0].value = bidPrice + coin.price.tickSize;
+                            coin.bid.qty = coin.quantity;
+                            coin.bid.value = bidPrice + coin.price.tickSize;
 
-                            coin.bids[1].qty = 0.00;
-                            coin.bids[1].value = 0.00;
+                            coin.ask.qty = coin.quantity;
+                            coin.ask.value = coin.bid.value * (1 + (coin.gain / 100));
 
-                            // coin.bidValue = bidPrice + coin.price.tickSize;
+                            doBid(function() {});
 
-                            coin.asks[0].qty = coin.quantity / 2;
-                            coin.asks[0].value = coin.bids[0].value * (1 + (coin.minGain / 100));
-
-                            coin.asks[1].qty = coin.quantity / 2;
-                            coin.asks[1].value = coin.asks[0].value * (1 + (coin.maxGain / 100));
-
-                            // coin.askValue = coin.bidValue * (1 + (coin.minGain / 100));
-
-                            doBid(coin, coin.bids[0], function() {});
-
-                            log('buying', 'qty: ' + coin.bids[0].qty.toFixed(coin.lot.stepPlaces) + 
-                                ' value: ' + coin.bids[0].value.toFixed(coin.price.tickPlaces));
+                            log('buying', 'qty: ' + coin.bid.qty.toFixed(coin.lot.stepPlaces) + 
+                                ' value: ' + coin.bid.value.toFixed(coin.price.tickPlaces));
 
                         } else if (monitor2.direction == 'sell') {
 
                             coin.trading = true;
 
-                            coin.asks[0].qty = coin.quantity;
-                            coin.asks[0].value = askPrice - coin.price.tickSize;
+                            coin.ask.qty = coin.quantity;
+                            coin.ask.value = askPrice - coin.price.tickSize;
 
-                            coin.asks[1].qty = 0.00;
-                            coin.asks[1].value = 0.00;
+                            coin.bid.qty = coin.quantity;
+                            coin.bid.value = coin.ask.value / (1 + (coin.gain / 100));
 
-                            // coin.askValue = askPrice - coin.price.tickSize;
+                            doAsk(function() {});
 
-                            coin.bids[0].qty = coin.quantity / 2;
-                            coin.bids[0].value = coin.asks[0].value / (1 + (coin.minGain / 100));
-
-                            coin.bids[1].qty = coin.quantity / 2;
-                            coin.bids[1].value = coin.bids[0].value / (1 + (coin.maxGain / 100));
-
-                            // coin.bidValue = coin.askValue / (1 + (coin.minGain / 100));
-
-                            doAsk(coin, coin.asks[0], function() {});
-
-                            log('selling', 'qty: '+coin.asks[0].qty.toFixed(coin.lot.stepPlaces) + 
-                                ' value: '+coin.asks[0].value.toFixed(coin.price.tickPlaces));
+                            log('selling', 'qty: '+coin.ask.qty.toFixed(coin.lot.stepPlaces) + 
+                                ' value: '+coin.ask.value.toFixed(coin.price.tickPlaces));
 
                         } else {
-                            // log('trading', 'direction: '+direction);
+                            if (debug) {
+                                log('wait');
+                            }
                         }
 
-                        setTimeout(bitbot, timeoutCheck, coin);
+                        setTimeout(bitbot, timeoutCheck);
 
                     } catch (error) {
                         log('error', 'bitbot.bookTicker error: '+error.message);
-                        setTimeout(bitbot, timeoutCheck, coin);
+                        setTimeout(bitbot, timeoutCheck);
                     }
                 });
 
@@ -763,12 +598,10 @@ var GetMarketInfo = function (symbol, interval, callback) {
         var diff = (y_line[numberOfKandles] / y_line[0]) - 1;
         var dir = '';
 
-        if (diff < -0.003) {
+        if (diff < 0) {
             dir = 'sell';
-        } else if (diff > 0.003) {
-            dir = 'buy';
         } else {
-            dir = 'nothing';
+            dir = 'buy';
         }
 
         if (debug) {
@@ -783,19 +616,17 @@ var GetMarketInfo = function (symbol, interval, callback) {
 
 var monitor2 = {
     direction : '',
-    init : function (coin) {
+    init : function () {
 
-        var symbol = coin.symbol;
-
-        GetMarketInfo(symbol, '1m', function (info) {
+        GetMarketInfo(coin.symbol, '5m', function (info) {
 
             monitor2.direction = info;
 
             if (!coin.init) { 
-                bitbot(coin); 
+                bitbot(); 
             }
         
-            setTimeout(monitor2.init, timeoutMonitor, coin);
+            setTimeout(monitor2.init, timeoutMonitor);
 
         });
 
@@ -810,7 +641,7 @@ if (process.argv.length > 2) {
 
         coin.symbol = coinSymbol;
         log('init', 'Initializing BitBot: '+coinSymbol);
-        monitor2.init(coin);
+        monitor2.init();
 
     } else {
 

@@ -705,22 +705,37 @@ var monitor2 = {
     percAvg : 0.00,
     direction : '',
     lastDirection : '',
-    id : 0,
     init : function (coinArray) {
 
         var symbol = coinArray[0].symbol;
 
-        binance.candlesticks(symbol, '1m', function(trades) {
+        binance.candlesticks(symbol, '1m', function(klines) {
 
             monitor2.recentPrices = 0.00;
             monitor2.oldPrices = 0.00;
 
-            for (var i=0; i<trades.length; i++) {
+            var top = 0.00;
+            var bottom = 999999999.99;
+            var kline = 0.00;
+
+            for (var i=0; i<klines.length; i++) {
+
+                kline = parseFloat(klines[i][4]);
+
                 if (i>=(numberOfKandles/2)) {
-                    monitor2.recentPrices += parseFloat(trades[i][4]);
+                    monitor2.recentPrices += kline;
                 } else {
-                    monitor2.oldPrices += parseFloat(trades[i][4]);
+                    monitor2.oldPrices += kline;
                 }
+
+                if (kline > top) {
+                    top = kline;
+                }
+
+                if (kline < bottom) {
+                    bottom = kline;
+                }
+
             }
 
             monitor2.recentPrices /= (numberOfKandles/2);
@@ -728,9 +743,11 @@ var monitor2 = {
             monitor2.percAvg = ((monitor2.recentPrices / monitor2.oldPrices) - 1) * 100;
             monitor2.direction = 'nothing';
 
-            if (monitor2.id > 0) {
+            binance.price(symbol, function(ticker) {
 
-                if (monitor2.percAvg < 0) {
+                var price = parseFloat(ticker.price);
+
+                if (monitor2.percAvg < 0 && price < bottom) {
                     
                     monitor2.direction = 'sell';
 
@@ -738,9 +755,7 @@ var monitor2 = {
                         coinArray[0].direction = 'sell';
                         bitbot(coinArray[0]); 
                     }
-                    
-                // } else if (monitor2.oldPrices <= monitor2.lastOld && monitor2.recentPrices >= monitor2.lastRecent) {
-                } else if (monitor2.percAvg > 0) {
+                } else if (monitor2.percAvg > 0 && price > top) {
 
                     monitor2.direction = 'buy';
 
@@ -749,22 +764,25 @@ var monitor2 = {
                         bitbot(coinArray[1]); 
                     }
 
-                } else {
-                    monitor2.direction = monitor2.lastDirection;
+                // } else {
+                //     monitor2.direction = monitor2.lastDirection;
                 }
-            }
 
-            console.log(
-                new Date().toISOString()+' ; '+
-                monitor2.oldPrices.toFixed(4)+' ; '+
-                monitor2.recentPrices.toFixed(4)+' ; '+
-                monitor2.percAvg.toFixed(4)+' ; '+
-                monitor2.direction);
- 
-            monitor2.lastDirection = monitor2.direction;
+                console.log(
+                    new Date().toISOString()+' ; '+
+                    monitor2.oldPrices.toFixed(4)+' ; '+
+                    monitor2.recentPrices.toFixed(4)+' ; '+
+                    monitor2.percAvg.toFixed(4)+' ; '+
+                    bottom.toFixed(4)+' ; '+
+                    top.toFixed(4)+' ; '+
+                    price.toFixed(4)+' ; '+
+                    monitor2.direction);
+    
+                monitor2.lastDirection = monitor2.direction;
 
-            monitor2.id++;
-            setTimeout(monitor2.init, timeoutMonitor, coinArray);
+                setTimeout(monitor2.init, timeoutMonitor, coinArray);
+
+            });
 
         }, {'limit' : numberOfKandles} );
 
@@ -790,3 +808,7 @@ if (process.argv.length > 2) {
     console.log('Use: node main.js <coin>');
     process.exit(0);
 }
+
+
+
+

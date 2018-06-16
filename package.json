@@ -1,0 +1,13 @@
+{
+  "name": "bitbot",
+  "description": "Bit Bot",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.259.1",
+    "node-binance-api": "^0.7.2"
+  }
+}

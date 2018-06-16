@@ -23,14 +23,13 @@ var dyn = new AWS.DynamoDB({apiVersion: '2012-08-10'});
 
 var timeoutOrder = 10000;
 var timeoutCheck = 30000;
-var timeoutMonitor = 60000;
+var timeoutMonitor = 30000;
 var timeoutConfig = 60000;
-var numberOfKandles = 250;
+var numberOfKandles = 10;
 var debug = false;
-var version = 11;
-var config_emaL = 90;
-var config_emaM = 25;
-var config_emaS = 7;
+// var emaL = 90;
+// var emaM = 25;
+// var emaS = 7;
 
 var config = function () {
     var params = {
@@ -44,7 +43,7 @@ var config = function () {
     dyn.getItem(params, function(err, data) {
 
         if (err) {
-            log('Error', err);
+            console.log("Error", err);
         } else {
 
             timeoutOrder = parseInt(data.Item.timeoutOrder.N);
@@ -52,9 +51,9 @@ var config = function () {
             timeoutMonitor = parseInt(data.Item.timeoutMonitor.N);
             numberOfKandles = parseInt(data.Item.numberOfKandles.N);
             debug = data.Item.debug.BOOL;
-            config_emaL = parseInt(data.Item.emaL.N);
-            config_emaM = parseInt(data.Item.emaM.N);
-            config_emaS = parseInt(data.Item.emaS.N);
+            // emaL = parseInt(data.Item.emaL.N);
+            // emaM = parseInt(data.Item.emaM.N);
+            // emaS = parseInt(data.Item.emaS.N);
 
             setTimeout(config, timeoutConfig);
 
@@ -117,9 +116,8 @@ var coin = {
     direction : ''
 }
 
-var log = function (type, message = '') {
+var log = function (coin, type, message = '') {
     var now = new Date();
-    now.setHours(now.getHours() - 3);
     console.log(now.toISOString()+' ('+type+') '+message);
 }
 
@@ -133,21 +131,17 @@ var saveGain = function (coin) {
         var fee = ((totalSell * (coin.fee / 100)) + (totalBuy * (coin.fee / 100))) * -1;
         var net = gain + fee;
     
-        var now = new Date();
-        now.setHours(now.getHours() - 3);
-    
         var params = {
             TableName: 'Trade',
             Item: {
-              'datetime' : {S: now.toISOString()},
+              'datetime' : {S: new Date().toISOString()},
               'symbol' : {S: coin.symbol},
               'qty' : {N: coin.quantity.toFixed(coin.lot.stepPlaces)},
               'bidTotal' : {N: totalBuy.toFixed(coin.price.tickPlaces)},
               'askTotal' : {N: totalSell.toFixed(coin.price.tickPlaces)},
               'grossGain' : {N: gain.toFixed(coin.price.tickPlaces)},
               'fee' : {N: fee.toFixed(coin.price.tickPlaces)},
-              'netGain' : {N: net.toFixed(coin.price.tickPlaces)},
-              'version' : {N: version.toString()}
+              'netGain' : {N: net.toFixed(coin.price.tickPlaces)}
             }
         };
           
@@ -155,14 +149,14 @@ var saveGain = function (coin) {
             try {
                 if (err) { throw err };
             } catch (error) {
-                log('error', 'saveGain error '+error.message);
+                log(coin, 'error', 'saveGain error '+error.message);
             }
         });
 
         coin.trading = false;
 
     } catch (error) {
-        log('error', 'saveGain error '+error.message);
+        log(coin, 'error', 'saveGain error '+error.message);
     }
 
 }
@@ -220,7 +214,7 @@ var checkBid = function (coin, bid) {
                 bid.value = parseFloat(json.price);
                 
                 coin.done++;
-                log('BOUGHT', 
+                log(coin, 'BOUGHT', 
                     'qty: ' + bid.qty.toFixed(coin.lot.stepPlaces) +
                     ' value: ' + bid.value.toFixed(coin.price.tickPlaces));
 
@@ -244,7 +238,7 @@ var checkBid = function (coin, bid) {
 
                 setTimeout(checkBid, timeoutOrder, coin, bid);
                 return;
-                // log('* BOUGHT PART', 'qty: '+coin.bidPartialQty.toFixed(coin.lot.stepPlaces)+' value: '+coin.bidValue.toFixed(coin.price.tickPlaces));
+                // log(coin, '* BOUGHT PART', 'qty: '+coin.bidPartialQty.toFixed(coin.lot.stepPlaces)+' value: '+coin.bidValue.toFixed(coin.price.tickPlaces));
 
             } else {
 
@@ -279,13 +273,13 @@ var checkBid = function (coin, bid) {
                                                 // coin.bidOpen = true;
     
                                             } catch (error) {
-                                                log('error', 'checkBid.buy qty: '+bid.qty.toFixed(coin.lot.stepPlaces)+' value: '+bid.value.toFixed(coin.price.tickPlaces)+' error: '+error.message);
+                                                log(coin, 'error', 'checkBid.buy qty: '+bid.qty.toFixed(coin.lot.stepPlaces)+' value: '+bid.value.toFixed(coin.price.tickPlaces)+' error: '+error.message);
                                             }
                                         });
     
                                     } catch (error) {
                                         if (!cancel && typeof cancel.msg !== "undefined" && cancel.msg != 'UNKNOWN_ORDER') {
-                                            log('error', 'checkBid.cancel bid order ' + bid.id + 
+                                            log(coin, 'error', 'checkBid.cancel bid order ' + bid.id + 
                                                 ' qty: ' + bid.qty.toFixed(coin.lot.stepPlaces) + 
                                                 ' value: ' + bid.value.toFixed(coin.price.tickPlaces) + 
                                                 ' error: ' + error.message);
@@ -299,7 +293,7 @@ var checkBid = function (coin, bid) {
                         setTimeout(checkBid, timeoutOrder, coin, bid);
 
                     } catch (error) {
-                        log('error', 'checkBid.bookTicker() error: ' + error.message);
+                        log(coin, 'error', 'checkBid.bookTicker() error: ' + error.message);
                         setTimeout(checkBid, timeoutOrder, coin, bid);
                     }
 
@@ -307,7 +301,7 @@ var checkBid = function (coin, bid) {
 
             }
         } catch (error) {
-            log('error', 'checkBid.orderStatus() bid order ' + bid.id +
+            log(coin, 'error', 'checkBid.orderStatus() bid order ' + bid.id +
                 ' error: ' + error.message);
 
             setTimeout(checkBid, timeoutOrder, coin, bid);
@@ -331,7 +325,7 @@ var doBid = function (coin, bid, callback) {
             bid.id = response.orderId;
             if (bid.id == 'undefined') { throw new Error('Invalid bid order Id'); }
 
-            // log('started', 'bid order '+coin.bidOrderId+' qty: '+coin.qty.toFixed(coin.lot.stepPlaces)+' value: '+coin.bidValue.toFixed(coin.price.tickPlaces));
+            // log(coin, 'started', 'bid order '+coin.bidOrderId+' qty: '+coin.qty.toFixed(coin.lot.stepPlaces)+' value: '+coin.bidValue.toFixed(coin.price.tickPlaces));
 
             callback();
 
@@ -339,7 +333,7 @@ var doBid = function (coin, bid, callback) {
 
         } catch (error) {
             // coin.bidOpen = false;
-            log('error', 'doBid() qty: '+bid.qty.toFixed(coin.lot.stepPlaces)+' value: '+bid.value.toFixed(coin.price.tickPlaces)+' error: '+error.message);
+            log(coin, 'error', 'doBid() qty: '+bid.qty.toFixed(coin.lot.stepPlaces)+' value: '+bid.value.toFixed(coin.price.tickPlaces)+' error: '+error.message);
         }
     });
 
@@ -401,7 +395,7 @@ var checkAsk = function (coin, ask) {
                 ask.value = parseFloat(json.price);
 
                 coin.done++;
-                log('SOLD', 'qty: ' + ask.qty.toFixed(coin.lot.stepPlaces) + 
+                log(coin, 'SOLD', 'qty: ' + ask.qty.toFixed(coin.lot.stepPlaces) + 
                     ' value: ' + ask.value.toFixed(coin.price.tickPlaces));
 
                 if (coin.done == 1) {
@@ -422,7 +416,7 @@ var checkAsk = function (coin, ask) {
 
                 setTimeout(checkAsk, timeoutOrder, coin, ask);
                 return;
-                // log('* SOLD PART', 'qty: '+coin.askPartialQty.toFixed(coin.lot.stepPlaces)+' value: '+coin.askValue.toFixed(coin.price.tickPlaces));
+                // log(coin, '* SOLD PART', 'qty: '+coin.askPartialQty.toFixed(coin.lot.stepPlaces)+' value: '+coin.askValue.toFixed(coin.price.tickPlaces));
 
             } else {
 
@@ -457,13 +451,13 @@ var checkAsk = function (coin, ask) {
                                                 // coin.askOpen = true;
     
                                             } catch (error) {
-                                                log('error', 'checkAsk.sell() qty: '+ask.qty.toFixed(coin.lot.stepPlaces)+' value: '+ask.value.toFixed(coin.price.tickPlaces)+' error: '+error.message);
+                                                log(coin, 'error', 'checkAsk.sell() qty: '+ask.qty.toFixed(coin.lot.stepPlaces)+' value: '+ask.value.toFixed(coin.price.tickPlaces)+' error: '+error.message);
                                             }
                                         });
     
                                     } catch (error) {
                                         if (!cancel && typeof cancel.msg !== "undefined" && cancel.msg != 'UNKNOWN_ORDER') {
-                                            log('error', 'checkAsk.cancel() ask order ' + ask.id + 
+                                            log(coin, 'error', 'checkAsk.cancel() ask order ' + ask.id + 
                                                 ' qty: ' + ask.qty.toFixed(coin.lot.stepPlaces) + 
                                                 ' value: ' + ask.value.toFixed(coin.price.tickPlaces) + 
                                                 ' error: ' + error.message);
@@ -478,7 +472,7 @@ var checkAsk = function (coin, ask) {
 
 
                     } catch (error) {
-                        log('error', 'checkAsk.bookTicker() error: '+error.message);
+                        log(coin, 'error', 'checkAsk.bookTicker() error: '+error.message);
                         setTimeout(checkAsk, timeoutOrder, coin, ask);
                     }
 
@@ -487,7 +481,7 @@ var checkAsk = function (coin, ask) {
             }
 
         } catch (error) {
-            log('error', 'checkAsk.orderStatus ask order ' + ask.id + 
+            log(coin, 'error', 'checkAsk.orderStatus ask order ' + ask.id + 
                 ' error: '+error.message);
 
             setTimeout(checkAsk, timeoutOrder, coin, ask);
@@ -511,7 +505,7 @@ var doAsk = function (coin, ask, callback) {
             ask.id = response.orderId;
             if (ask.id == 'undefined') { throw new Error('Invalid ask order Id'); }
 
-            // log('started', 'ask order '+coin.askOrderId+' qty: '+coin.qty.toFixed(coin.lot.stepPlaces)+' value: '+coin.askValue.toFixed(coin.price.tickPlaces));
+            // log(coin, 'started', 'ask order '+coin.askOrderId+' qty: '+coin.qty.toFixed(coin.lot.stepPlaces)+' value: '+coin.askValue.toFixed(coin.price.tickPlaces));
 
             callback();
 
@@ -519,7 +513,7 @@ var doAsk = function (coin, ask, callback) {
             
         } catch (error) {
             // coin.askOpen = false;
-            log('error', 'doAsk() qty: '+ask.qty.toFixed(coin.lot.stepPlaces)+' value: '+ask.value.toFixed(coin.price.tickPlaces)+' error: '+error.message);
+            log(coin, 'error', 'doAsk() qty: '+ask.qty.toFixed(coin.lot.stepPlaces)+' value: '+ask.value.toFixed(coin.price.tickPlaces)+' error: '+error.message);
         }
 
     });
@@ -578,7 +572,7 @@ var bitbot = function (coin) {
                 setTimeout(bitbot, timeoutCheck, coin);
 
             } catch (error) {
-                log('error', 'bitbot.exchangeInfo '+error.message);
+                log(coin, 'error', 'bitbot.exchangeInfo '+error.message);
             }
         });
 
@@ -600,7 +594,7 @@ var bitbot = function (coin) {
         dyn.getItem(params, function(err, data) {
 
             if (err) {
-                log('Error', err);
+                console.log("Error", err);
             } else {
 
                 coin.quantity = parseFloat(data.Item.quantity.N);
@@ -614,7 +608,7 @@ var bitbot = function (coin) {
 
                 var pause = parseInt(data.Item.pause.N);
                 if (pause) {
-                    log('pause');
+                    log(coin, 'pause');
                     setTimeout(bitbot, timeoutCheck, coin);
                     return;
                 }
@@ -656,8 +650,10 @@ var bitbot = function (coin) {
 
                             doBid(coin, coin.bids[0], function() {});
 
-                            log('buying', 'qty: ' + coin.bids[0].qty.toFixed(coin.lot.stepPlaces) + 
-                                ' value: ' + coin.bids[0].value.toFixed(coin.price.tickPlaces));
+                            log(coin, 'buying', 'qty: ' + coin.bids[0].qty.toFixed(coin.lot.stepPlaces) + 
+                                ' bid: ' + coin.bids[0].value.toFixed(coin.price.tickPlaces) +
+                                ' ask1: ' + coin.asks[0].value.toFixed(coin.price.tickPlaces) +
+                                ' ask2: ' + coin.asks[1].value.toFixed(coin.price.tickPlaces));
 
                         } else if (monitor2.direction == 'sell') {
 
@@ -681,17 +677,19 @@ var bitbot = function (coin) {
 
                             doAsk(coin, coin.asks[0], function() {});
 
-                            log('selling', 'qty: '+coin.asks[0].qty.toFixed(coin.lot.stepPlaces) + 
-                                ' value: '+coin.asks[0].value.toFixed(coin.price.tickPlaces));
+                            log(coin, 'selling', 'qty: '+coin.asks[0].qty.toFixed(coin.lot.stepPlaces) + 
+                                ' ask: '+coin.asks[0].value.toFixed(coin.price.tickPlaces) +
+                                ' bid1: ' + coin.bids[0].value.toFixed(coin.price.tickPlaces) +
+                                ' bid2: ' + coin.bids[1].value.toFixed(coin.price.tickPlaces));
 
                         } else {
-                            // log('trading', 'direction: '+direction);
+                            // log(coin, 'trading', 'direction: '+direction);
                         }
 
                         setTimeout(bitbot, timeoutCheck, coin);
 
                     } catch (error) {
-                        log('error', 'bitbot.bookTicker error: '+error.message);
+                        log(coin, 'error', 'bitbot.bookTicker error: '+error.message);
                         setTimeout(bitbot, timeoutCheck, coin);
                     }
                 });
@@ -705,28 +703,36 @@ var GetMarketInfo = function (symbol, interval, callback) {
 
     binance.candlesticks(symbol, interval, function(klines) {
 
-        var kline = 0.00;
+        var avgs = 0.00;
 
-        var close = [];
+//        var close = [];
 
         for (var i=0; i<klines.length; i++) {
 
-            kline = parseFloat(klines[i][4]);
-            close[i] = kline;
+            var high = parseFloat(klines[i][2]);
+            var low = parseFloat(klines[i][3]);
+            var avg = (high + low) / 2;
+
+//            kline = parseFloat(klines[i][4]);
+//            close[i] = kline;
+            avgs += avg;
         }
 
-        var vec = close.toVector();
-        var arrEmaS = vec.ema(config_emaS);
-        var arrEmaM = vec.ema(config_emaM);
-        var arrEmaL = vec.ema(config_emaL);
+        avgs /= 10;
 
-        var emaS = arrEmaS[arrEmaS.length-1];
-        var emaM = arrEmaM[arrEmaM.length-1];
-        var emaL = arrEmaL[arrEmaL.length-1];
+        // var vec = close.toVector();
+        // var arrEmaS = vec.ema(emaS);
+        // var arrEmaM = vec.ema(emaM);
+//        var arrEmaL = vec.ema(emaL);
 
-        callback(emaS, emaM, emaL);
+        // var retEmaS = arrEmaS[arrEmaS.length-1];
+        // var retEmaM = arrEmaM[arrEmaM.length-1];
+//        var retEmaL = arrEmaL[arrEmaL.length-1];
+        // var retEmaL = 0;
 
-    }, {'limit' : numberOfKandles} );
+        callback(avgs);
+
+    }, {'limit' : 10} );
 }
 
 var monitor2 = {
@@ -735,37 +741,38 @@ var monitor2 = {
 
         var symbol = coin.symbol;
 
-        GetMarketInfo(symbol, '5m', function (emaS, emaM, emaL) {
+        GetMarketInfo(symbol, '1m', function (avgs) {
 
-            binance.price(symbol, function(price) {
+            // GetMarketInfo(symbol, '5m', function (emaS5m, emaM5m, emaL5m) {
+            
+                binance.price(symbol, function(price) {
 
-                var price = parseFloat(price.price);
+                    var price = parseFloat(price.price);
 
-                if (emaL < emaM && emaM < emaS && emaS < price) {
-                    monitor2.direction = 'buy';
-                } else if (emaL > emaM && emaM > emaS && emaS > price) {
-                    monitor2.direction = 'sell';
-                } else {
-                    monitor2.direction = 'nothing';
-                }
+                    if ((avgs * 1.005) < price) {
+                        monitor2.direction = 'buy';
+                    } else if ((avgs / 1.005) > price) {
+                        monitor2.direction = 'sell';
+                    } else {
+                        monitor2.direction = 'nothing';
+                    }
 
-                if (!coin.init) { 
-                    bitbot(coin); 
-                }
+                    if (!coin.init) { 
+                        bitbot(coin); 
+                    }
 
-                if (debug) {
-                    log('monitor', 
-                        price.toFixed(2) + '  ' +
-                        emaS.toFixed(2) + '  ' +
-                        emaM.toFixed(2) + '  ' +
-                        emaL.toFixed(2) + '  ' +
-                        monitor2.direction);
-                }
-    
-                setTimeout(monitor2.init, timeoutMonitor, coin);
+                    if (debug) {
+                        console.log(
+                            new Date().toISOString() + '\t' +
+                            avgs.toFixed(2) + '\t' +
+                            price.toFixed(2) + '\t' +
+                            monitor2.direction);
+                    }
+        
+                    setTimeout(monitor2.init, timeoutMonitor, coin);
 
-            });
-
+                });
+            // });
         });
 
     }    
@@ -778,18 +785,18 @@ if (process.argv.length > 2) {
     if (coinSymbol == 'BNBUSDT' || coinSymbol == 'BTCUSDT') {
 
         coin.symbol = coinSymbol;
-        log('init', 'Initializing BitBot: '+coinSymbol);
+        console.log('Initializing BitBot: '+coinSymbol);
         monitor2.init(coin);
 
     } else {
 
-        log('init', 'Invalid coin: '+coinSymbol);
+        console.log('Invalid coin: '+coinSymbol);
         process.exit(0);
 
     }
 } else {
 
-    log('init', 'Use: node main.js <coin>');
+    console.log('Use: node main.js <coin>');
     process.exit(0);
 
 }

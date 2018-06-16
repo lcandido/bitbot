@@ -23,11 +23,11 @@ var timeoutOrder = 10000;
 var timeoutCheck = 30000;
 var timeoutMonitor = 60000;
 var timeoutConfig = 60000;
-var numberOfKandles = 15;
+var numberOfKandles = 5;
 var debug = true;
-var version = 16;
+var version = 17;
 var delayBetweenTrades = 0;
-var delayBetweenTradesConfig = 2;
+var delayBetweenTradesConfig = 10;
 var interval = '1m';
 
 var config = function () {
@@ -37,7 +37,8 @@ var config = function () {
           'symbol' : {S: 'BitBot'},
         }
       };
-      
+    
+    try {
     // Call DynamoDB to read the item from the table
     dyn.getItem(params, function(err, data) {
 
@@ -57,6 +58,9 @@ var config = function () {
 
         }
     });        
+    } catch (error) {
+        log('error', 'config error '+error.message);
+    }
 }
 config();
 
@@ -119,6 +123,8 @@ var saveGain = function () {
               'datetime' : {S: now.toISOString()},
               'symbol' : {S: coin.symbol},
               'qty' : {N: coin.qty.toFixed(coin.lot.stepPlaces)},
+              'bidValue' : {N: coin.bid.value.toFixed(coin.price.tickPlaces)},
+              'askValue' : {N: coin.ask.value.toFixed(coin.price.tickPlaces)},
               'bidTotal' : {N: bidTotal.toFixed(coin.price.tickPlaces)},
               'askTotal' : {N: askTotal.toFixed(coin.price.tickPlaces)},
               'grossGain' : {N: grossGain.toFixed(coin.price.tickPlaces)},
@@ -423,7 +429,7 @@ var bitbot = function () {
 
     } else {
 
-        if (coin.trading) {
+        if (coin.trading || delayBetweenTrades > 0) {
             setTimeout(bitbot, timeoutCheck);
             return;
         }
@@ -442,13 +448,6 @@ var bitbot = function () {
                 log('Error', err);
             } else {
 
-                coin.qty = parseFloat(data.Item.quantity.N);
-
-                if (coin.qty < coin.lot.minQty || coin.qty > coin.lot.maxQty) { throw new Error('invalid qty value: '+coin.qty); }
-
-                coin.gain = parseFloat(data.Item.maxGain.N);
-                coin.fee = parseFloat(data.Item.fee.N);
-
                 var pause = parseInt(data.Item.pause.N);
                 if (pause) {
                     if (debug) {
@@ -458,16 +457,24 @@ var bitbot = function () {
                     return;
                 }
 
-                coin.trading = true;
+                coin.qty = parseFloat(data.Item.quantity.N);
+                if (coin.qty < coin.lot.minQty || coin.qty > coin.lot.maxQty) { throw new Error('invalid qty value: '+coin.qty); }
+
+                coin.gain = parseFloat(data.Item.maxGain.N);
+                coin.fee = parseFloat(data.Item.fee.N);
+
+                coin.trading = false;
                 coin.done = 0;
                 coin.direction = monitor2.direction;
 
                 if (coin.direction == 'buy') {
 
+                    coin.trading = true;
                     doBid();
 
                 } else if (coin.direction == 'sell') {
 
+                    coin.trading = true;
                     doAsk();
 
                 } else {
@@ -477,8 +484,10 @@ var bitbot = function () {
                     }
 
                 }
-
             }
+
+            setTimeout(bitbot, timeoutCheck);
+
         });
     }
 }

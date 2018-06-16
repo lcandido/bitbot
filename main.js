@@ -19,22 +19,12 @@ AWS.config.update({
 
 var dyn = new AWS.DynamoDB({apiVersion: '2012-08-10'});
 
-// binance.allOrders('BNBUSDT', function(data, symbol) {
-//     try {
-//         console.log(data);
-//         console.log(symbol);
-//     } catch (error) {
-//         console.log(error.message);
-//     }
-// }, 10);
-
 var timeoutOrder = 10000;
 var timeoutCheck = 30000;
 var timeoutMonitor = 60000;
 var timeoutConfig = 60000;
 var numberOfKandles = 25;
 var debug = false;
-var version = 9;
 
 var config = function () {
     var params = {
@@ -143,8 +133,7 @@ var saveGain = function (coin) {
               'askTotal' : {N: totalSell.toFixed(coin.price.tickPlaces)},
               'grossGain' : {N: gain.toFixed(coin.price.tickPlaces)},
               'fee' : {N: fee.toFixed(coin.price.tickPlaces)},
-              'netGain' : {N: net.toFixed(coin.price.tickPlaces)},
-              'version' : {N: version.toString()}
+              'netGain' : {N: net.toFixed(coin.price.tickPlaces)}
             }
         };
           
@@ -703,15 +692,14 @@ var GetMarketInfo = function (symbol, interval, callback) {
     binance.candlesticks(symbol, interval, function(klines) {
 
         var kline = 0.00;
+        var avg = 0.00;
         var top = 0.00;
         var bottom = 999999999.99;
-
-        var close = [];
 
         for (var i=0; i<klines.length; i++) {
 
             kline = parseFloat(klines[i][4]);
-            close[i] = kline;
+            avg += kline;
 
             if (kline > top) {
                 top = kline;
@@ -722,18 +710,11 @@ var GetMarketInfo = function (symbol, interval, callback) {
             }
         }
 
-        var vec = close.toVector();
-        var arrEma10 = vec.ema(7);
-        var arrEma30 = vec.ema(25);
-        var arrEma60 = vec.ema(90);
+        avg /= numberOfKandles;
 
-        var ema10 = arrEma10[arrEma10.length-1];
-        var ema30 = arrEma30[arrEma30.length-1];
-        var ema60 = arrEma60[arrEma60.length-1];
+        callback(avg, bottom, top);
 
-        callback(ema10, ema30, ema60, bottom, top);
-
-    }, {'limit' : 250} );
+    }, {'limit' : numberOfKandles} );
 
 }
 
@@ -743,36 +724,42 @@ var monitor2 = {
 
         var symbol = coin.symbol;
 
-        GetMarketInfo(symbol, '15m', function (ema10, ema30, ema60, bottom, top) {
+        GetMarketInfo(symbol, '15m', function (movingAvg15m, bottom15m, top15m) {
 
-            binance.price(symbol, function(price) {
+            GetMarketInfo(symbol, '5m', function (movingAvg5m, bottom5m, top5m) {
 
-                var price = parseFloat(price.price);
+                GetMarketInfo(symbol, '1m', function (movingAvg1m, bottom1m, top1m) {
 
-                if (ema60 < ema30 && ema30 < ema10 && ema10 < price) {
-                    monitor2.direction = 'buy';
-                } else if (ema60 > ema30 && ema30 > ema10 && ema10 > price) {
-                    monitor2.direction = 'sell';
-                } else {
-                    monitor2.direction = 'nothing';
-                }
+                    binance.price(symbol, function(price) {
 
-                if (!coin.init) { 
-                    bitbot(coin); 
-                }
+                        var price = parseFloat(price.price);
 
-                if (debug) {
-                    console.log(
-                        new Date().toISOString() + '\t' +
-                        ema60.toFixed(2) + '\t' +
-                        ema30.toFixed(2) + '\t' +
-                        ema10.toFixed(2) + '\t' +
-                        price.toFixed(2) + '\t' +
-                        monitor2.direction);
-                }
-    
-                setTimeout(monitor2.init, timeoutMonitor, coin);
+                        if (movingAvg15m < movingAvg5m && movingAvg5m < movingAvg1m && movingAvg1m < price) {
+                            monitor2.direction = 'buy';
+                        } else if (movingAvg15m > movingAvg5m && movingAvg5m > movingAvg1m && movingAvg1m > price) {
+                            monitor2.direction = 'sell';
+                        } else {
+                            monitor2.direction = 'nothing';
+                        }
 
+                        if (!coin.init) { 
+                            bitbot(coin); 
+                        }
+
+                        if (debug) {
+                            console.log(
+                                new Date().toISOString() + '\t' +
+                                movingAvg15m.toFixed(2) + '\t' +
+                                movingAvg5m.toFixed(2) + '\t' +
+                                movingAvg1m.toFixed(2) + '\t' +
+                                price.toFixed(2) + '\t' +
+                                monitor2.direction);
+                        }
+            
+                        setTimeout(monitor2.init, timeoutMonitor, coin);
+
+                    });
+                });
             });
         });
 

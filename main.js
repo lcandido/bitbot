@@ -48,10 +48,10 @@ var config = function () {
 
             timeoutOrder = parseInt(data.Item.timeoutOrder.N);
             timeoutCheck = parseInt(data.Item.timeoutCheck.N);
-            // timeoutMonitor = parseInt(data.Item.timeoutMonitor.N);
+            timeoutMonitor = parseInt(data.Item.timeoutMonitor.N);
             numberOfKandles = parseInt(data.Item.numberOfKandles.N);
             delayBetweenTradesConfig = parseInt(data.Item.delayBetweenTrades.N);
-            // debug = data.Item.debug.BOOL;
+            debug = data.Item.debug.BOOL;
             interval = data.Item.interval.S;
 
             setTimeout(config, timeoutConfig);
@@ -470,12 +470,12 @@ var bitbot = function () {
                 if (coin.direction == 'bull') {
 
                     coin.trading = true;
-                    // doBid();
+                    doBid();
 
                 } else if (coin.direction == 'bear') {
 
                     coin.trading = true;
-                    // doAsk();
+                    doAsk();
 
                 } else {
 

@@ -1,12 +1,12 @@
 'use strict';
 
-var settings = require('./config');
 const binance = require('node-binance-api');
+var settings = require('./config');
+
 binance.options({
   'APIKEY': settings.binance.apiKey,
   'APISECRET': settings.binance.secretKey
 });
-
 
 var AWS = require('aws-sdk');
 // AWS.config.update({ region: "sa-east-1" });
@@ -21,11 +21,11 @@ var dyn = new AWS.DynamoDB({apiVersion: '2012-08-10'});
 
 var timeoutOrder = 10000;
 var timeoutCheck = 30000;
-var timeoutMonitor = 60000;
+var timeoutMonitor = 15000;
 var timeoutConfig = 60000;
 var numberOfKandles = 5;
 var debug = true;
-var version = 17;
+var version = 18;
 var delayBetweenTrades = 0;
 var delayBetweenTradesConfig = 10;
 var interval = '1m';
@@ -48,10 +48,10 @@ var config = function () {
 
             timeoutOrder = parseInt(data.Item.timeoutOrder.N);
             timeoutCheck = parseInt(data.Item.timeoutCheck.N);
-            timeoutMonitor = parseInt(data.Item.timeoutMonitor.N);
+            // timeoutMonitor = parseInt(data.Item.timeoutMonitor.N);
             numberOfKandles = parseInt(data.Item.numberOfKandles.N);
             delayBetweenTradesConfig = parseInt(data.Item.delayBetweenTrades.N);
-            debug = data.Item.debug.BOOL;
+            // debug = data.Item.debug.BOOL;
             interval = data.Item.interval.S;
 
             setTimeout(config, timeoutConfig);
@@ -420,7 +420,7 @@ var bitbot = function () {
 
                 coin.init = true;
 
-                setTimeout(bitbot, timeoutCheck);
+                bitbot();
 
             } catch (error) {
                 log('error', 'bitbot.exchangeInfo '+error.message);
@@ -467,15 +467,15 @@ var bitbot = function () {
                 coin.done = 0;
                 coin.direction = monitor2.direction;
 
-                if (coin.direction == 'buy') {
+                if (coin.direction == 'bull') {
 
                     coin.trading = true;
-                    doBid();
+                    // doBid();
 
-                } else if (coin.direction == 'sell') {
+                } else if (coin.direction == 'bear') {
 
                     coin.trading = true;
-                    doAsk();
+                    // doAsk();
 
                 } else {
 
@@ -492,91 +492,144 @@ var bitbot = function () {
     }
 }
 
-var GetMarketInfo = function (symbol, interval, callback) {
+var GetMarketInfo = function (symbol, callback) {
 
-    binance.candlesticks(symbol, interval, function(klines) {
+    var depthLimit = 50;
 
-        var x = [];
-        var y = [];
-        var totalX = 0.00;
-        var totalY = 0.00;
+    binance.depth(symbol, function(depth, symbol)  {
 
-        for (var i=0; i<numberOfKandles; i++) {
+        try {
 
-            x[i] = i+1;
-            y[i] = parseFloat(klines[i][4]);
-            totalX += x[i];
-            totalY += y[i];
+            if (!depth) { throw new Error('Invalid API depth'); }
+
+            var price = 0.00;
+
+            binance.price(symbol, function(ticker) {
+                
+                try {
+                    if (!ticker) { throw new Error('Invalid API price ticker'); }
+        
+                    price = parseFloat(ticker.price);
+
+                    var value = 0.0;
+                    var qty = 0.0;
+                    var total = 0.0;
+                    var wTotal = 0.0;
+        
+                    var weight = depthLimit * 10;
+                    var totalWeight = 0;
+            
+                    var volAsks = 0.0;
+                    var totalAsks = 0.0;
+                    var wTotalAsks = 0.0;
+                    var firstAsk = 0.0;
+                    var isFirst = true;
+            
+                    // console.log('asks');
+                    for ( let ask in depth.asks ) {
+                        value = parseFloat(ask);
+                        qty = parseFloat(depth.asks[ask]);
+            
+                        if (isFirst) { 
+                            firstAsk = value;
+                            value = 1; 
+                            isFirst = false; 
+                        } else {
+                            value = value - firstAsk;
+                        }
+            
+                        total = value * qty;
+                        wTotal = total * weight;
+                        totalWeight += weight;
+                        weight-=10;
+                
+                        totalAsks += total;
+                        wTotalAsks += wTotal;
+                        volAsks += qty;
+                        // console.log(value.toFixed(6).replace('.', ',')+'\t'+
+                        //     qty.toFixed(6).replace('.', ',')+'\t'+
+                        //     total.toFixed(6).replace('.', ',')+'\t'+
+                        //     totalAsks.toFixed(6).replace('.', ','));
+                    }
+            
+                    wTotalAsks /= totalWeight;
+        
+                    var volBids = 0.0;
+                    var totalBids = 0.0;
+                    var wTotalBids = 0.0;
+                    var firstBid = 0.0;
+        
+                    var weight = depthLimit * 10;
+        
+                    isFirst = true;
+            
+                    // console.log('bids');
+                    for ( let bid in depth.bids ) {
+            
+                        value = parseFloat(bid);
+                        qty = parseFloat(depth.bids[bid]);
+            
+                        if (isFirst) { 
+                            firstBid = value; 
+                            value = 1;
+                            isFirst = false;
+                        } else {
+                            value = firstBid - value;
+                        }
+            
+                        total = value * qty;
+                        wTotal = total * weight;
+                        weight-=10;
+        
+                        totalBids += total;
+                        wTotalBids += wTotal;
+                        volBids += qty;
+                        // console.log(value.toFixed(6).replace('.', ',')+'\t'+
+                        // qty.toFixed(6).replace('.', ',')+'\t'+
+                        // total.toFixed(6).replace('.', ',')+'\t'+
+                        // totalBids.toFixed(6).replace('.', ','));
+            
+                    }
+        
+                    wTotalBids /= totalWeight;
+        
+                    var now = new Date();
+                    now.setHours(now.getHours() - 3);
+
+                    var wDirection = '';
+
+                    if ((wTotalAsks / wTotalBids) > 3) {
+                        wDirection = 'bear';
+                    } else if ((wTotalBids / wTotalAsks) > 3) {
+                        wDirection = 'bull';
+                    } else {
+                        wDirection = 'wait';
+                    }
+
+                    callback(wDirection);
+
+                    // if (wDirection != 'wait') {
+                    if (debug) {
+                        console.log(now.toISOString()+'\t'+
+                        price.toFixed(4).replace('.', ',')+'\t'+
+                        wTotalAsks.toFixed(4).replace('.', ',')+'\t'+wTotalBids.toFixed(4).replace('.', ',')+'\t'+
+                        wDirection);
+                    }
+                    // }
+
+                } catch (error) {
+                    console.log('error;'+error.message)
+                }
+
+            });
+    
+        } catch (error) {
+            console.log('error;'+error.message);
         }
 
-        var meanX = totalX / numberOfKandles;
-        var meanY = totalY / numberOfKandles;
-
-        var x1 = [];
-        var y1 = [];
-        var xy = [];
-        var x2 = [];
-        var y2 = [];
-        var totalXY = 0.00;
-        var totalX2 = 0.00;
-        var totalY2 = 0.00;
-
-        for (var i=0; i<numberOfKandles; i++) {
-
-            x1[i] = x[i] - meanX;
-            y1[i] = y[i] - meanY;
-
-            xy[i] = x1[i] * y1[i];
-            totalXY += xy[i];
-
-            x2[i] = Math.pow(x1[i], 2);
-            y2[i] = Math.pow(y1[i], 2);
-
-            totalX2 += x2[i];
-            totalY2 += y2[i];
-
-        }
-
-        // standard deviation
-        var sX = Math.sqrt(totalX2 / (numberOfKandles - 1));
-        var sY = Math.sqrt(totalY2 / (numberOfKandles - 1));
-
-        // correlation
-        var r = totalXY / Math.sqrt(totalX2 * totalY2);
-
-        // slope
-        var b = r * sY / sX;
-
-        // intercept
-        var a = meanY - (b * meanX);
-
-        i = numberOfKandles;
-        x[i] = i + 1;
-        y[i] = (b * x[i]) + a;
-
-        var y_line = [];
-        for (i=0; i<=numberOfKandles; i++) {
-            y_line[i] = (b * x[i]) + a;
-        }
-
-        var diff = (y_line[numberOfKandles] / y_line[0]) - 1;
-        var dir = '';
-
-        if (diff < 0) {
-            dir = 'sell';
-        } else {
-            dir = 'buy';
-        }
-
-        if (debug) {
-            log('monitor', y_line[0].toFixed(4) + ' ' + y_line[numberOfKandles].toFixed(4) + ' ' + diff.toFixed(4) + ' ' + dir);
-        }
-
-        callback(dir);
-
-    }, {'limit' : numberOfKandles} );
-
+    }, depthLimit);
 }
+
 
 var monitor2 = {
     direction : '',
@@ -589,7 +642,7 @@ var monitor2 = {
             return;
         }
 
-        GetMarketInfo(coin.symbol, interval, function (info) {
+        GetMarketInfo(coin.symbol, function (info) {
 
             monitor2.direction = info;
 

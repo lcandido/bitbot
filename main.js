@@ -44,9 +44,8 @@ var config = function () {
 
             timeoutOrder = parseInt(data.Item.timeoutOrder.N);
             timeoutCheck = parseInt(data.Item.timeoutCheck.N);
-            // timeoutMonitor = parseInt(data.Item.timeoutMonitor.N);
-            // numberOfKandles = parseInt(data.Item.numberOfKandles.N);
-            // debug = data.Item.debug.BOOL;
+            timeoutMonitor = parseInt(data.Item.timeoutMonitor.N);
+            debug = data.Item.debug.BOOL;
 
             setTimeout(config, timeoutConfig);
 

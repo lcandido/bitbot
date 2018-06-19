@@ -23,12 +23,8 @@ var timeoutOrder = 10000;
 var timeoutCheck = 30000;
 var timeoutMonitor = 15000;
 var timeoutConfig = 60000;
-var numberOfKandles = 5;
 var debug = true;
-var version = 18;
-var delayBetweenTrades = 0;
-var delayBetweenTradesConfig = 10;
-var interval = '1m';
+var version = 19;
 
 var config = function () {
     var params = {
@@ -48,11 +44,9 @@ var config = function () {
 
             timeoutOrder = parseInt(data.Item.timeoutOrder.N);
             timeoutCheck = parseInt(data.Item.timeoutCheck.N);
-            timeoutMonitor = parseInt(data.Item.timeoutMonitor.N);
-            numberOfKandles = parseInt(data.Item.numberOfKandles.N);
-            delayBetweenTradesConfig = parseInt(data.Item.delayBetweenTrades.N);
-            debug = data.Item.debug.BOOL;
-            interval = data.Item.interval.S;
+            // timeoutMonitor = parseInt(data.Item.timeoutMonitor.N);
+            // numberOfKandles = parseInt(data.Item.numberOfKandles.N);
+            // debug = data.Item.debug.BOOL;
 
             setTimeout(config, timeoutConfig);
 
@@ -142,7 +136,6 @@ var saveGain = function () {
             }
         });
 
-        delayBetweenTrades = delayBetweenTradesConfig;
         coin.trading = false;
 
     } catch (error) {
@@ -429,7 +422,7 @@ var bitbot = function () {
 
     } else {
 
-        if (coin.trading || delayBetweenTrades > 0) {
+        if (coin.trading) {
             setTimeout(bitbot, timeoutCheck);
             return;
         }
@@ -479,9 +472,9 @@ var bitbot = function () {
 
                 } else {
 
-                    if (debug) {
-                        log('wait');
-                    }
+                    // if (debug) {
+                    //     log('wait');
+                    // }
 
                 }
             }
@@ -606,7 +599,7 @@ var GetMarketInfo = function (symbol, callback) {
                         wDirection = 'wait';
                     }
 
-                    callback(wDirection);
+                    callback(wDirection, price, firstAsk, firstBid);
 
                     // if (wDirection != 'wait') {
                     if (debug) {
@@ -630,21 +623,160 @@ var GetMarketInfo = function (symbol, callback) {
     }, depthLimit);
 }
 
+var GetMarketInfo2 = function (symbol, callback) {
+
+    var depthLimit = 50;
+
+    binance.depth(symbol, function(depth, symbol)  {
+
+        try {
+
+            if (!depth) { throw new Error('Invalid API depth'); }
+
+            var price = 0.00;
+
+            binance.price(symbol, function(ticker) {
+                
+                try {
+                    if (!ticker) { throw new Error('Invalid API price ticker'); }
+        
+                    price = parseFloat(ticker.price);
+
+                    var value = 0.0;
+                    var qty = 0.0;
+                    var total = 0.0;
+                    var wTotal = 0.0;
+        
+                    var weight = depthLimit * 10;
+                    var totalWeight = 0;
+            
+                    var volAsks = 0.0;
+                    var totalAsks = 0.0;
+                    var wTotalAsks = 0.0;
+                    var firstAsk = 0.0;
+                    var isFirst = true;
+            
+                    // console.log('asks');
+                    for ( let ask in depth.asks ) {
+                        value = parseFloat(ask);
+                        qty = parseFloat(depth.asks[ask]);
+            
+                        if (isFirst) { 
+                            firstAsk = value;
+                            value = 1; 
+                            isFirst = false; 
+                        } else {
+                            value = value - firstAsk;
+                        }
+            
+                        total = value * qty;
+                        wTotal = total * weight;
+                        totalWeight += weight;
+                        weight-=10;
+                
+                        totalAsks += total;
+                        wTotalAsks += wTotal;
+                        volAsks += qty;
+                        // console.log(value.toFixed(6).replace('.', ',')+'\t'+
+                        //     qty.toFixed(6).replace('.', ',')+'\t'+
+                        //     total.toFixed(6).replace('.', ',')+'\t'+
+                        //     totalAsks.toFixed(6).replace('.', ','));
+                    }
+            
+                    wTotalAsks /= totalWeight;
+        
+                    var volBids = 0.0;
+                    var totalBids = 0.0;
+                    var wTotalBids = 0.0;
+                    var firstBid = 0.0;
+        
+                    var weight = depthLimit * 10;
+        
+                    isFirst = true;
+            
+                    // console.log('bids');
+                    for ( let bid in depth.bids ) {
+            
+                        value = parseFloat(bid);
+                        qty = parseFloat(depth.bids[bid]);
+            
+                        if (isFirst) { 
+                            firstBid = value; 
+                            value = 1;
+                            isFirst = false;
+                        } else {
+                            value = firstBid - value;
+                        }
+            
+                        total = value * qty;
+                        wTotal = total * weight;
+                        weight-=10;
+        
+                        totalBids += total;
+                        wTotalBids += wTotal;
+                        volBids += qty;
+                        // console.log(value.toFixed(6).replace('.', ',')+'\t'+
+                        // qty.toFixed(6).replace('.', ',')+'\t'+
+                        // total.toFixed(6).replace('.', ',')+'\t'+
+                        // totalBids.toFixed(6).replace('.', ','));
+            
+                    }
+        
+                    wTotalBids /= totalWeight;
+        
+                    var now = new Date();
+                    now.setHours(now.getHours() - 3);
+
+                    var wDirection = '';
+                    var isRandom = false;
+
+                    if ((wTotalAsks / wTotalBids) > 3) {
+                        wDirection = 'bear';
+                    } else if ((wTotalBids / wTotalAsks) > 3) {
+                        wDirection = 'bull';
+                    } else {
+                        var random_boolean = Math.random() >= 0.5;
+                        wDirection = (random_boolean) ? 'bull' : 'bear';
+                        isRandom = true;
+                    }
+
+                    callback(wDirection);
+
+                    // if (wDirection != 'wait') {
+                    if (debug) {
+                        console.log(now.toISOString()+'\t'+
+                        price.toFixed(4).replace('.', ',')+'\t'+
+                        wTotalAsks.toFixed(4).replace('.', ',')+'\t'+wTotalBids.toFixed(4).replace('.', ',')+'\t'+
+                        wDirection+'\t'+(isRandom?'random':''));
+                    }
+                    // }
+
+                } catch (error) {
+                    console.log('error;'+error.message)
+                }
+
+            });
+    
+        } catch (error) {
+            console.log('error;'+error.message);
+        }
+
+    }, depthLimit);
+
+}
 
 var monitor2 = {
     direction : '',
     init : function () {
 
-        if (delayBetweenTrades > 0) {
-            monitor2.direction = 'wait';
-            delayBetweenTrades--;
+        if (coin.trading) {
             setTimeout(monitor2.init, timeoutMonitor);
             return;
         }
 
-        GetMarketInfo(coin.symbol, function (info) {
+        GetMarketInfo2(coin.symbol, function (direction) {
 
-            monitor2.direction = info;
+            monitor2.direction = direction;
 
             if (!coin.init) { 
                 bitbot(); 

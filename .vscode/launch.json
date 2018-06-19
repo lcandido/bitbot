@@ -10,7 +10,7 @@
             "name": "Launch Program",
             "program": "${workspaceFolder}/main.js",
             "args": [
-                "BTCUSDT"
+                "BNBUSDT"
             ]
         }
     ]

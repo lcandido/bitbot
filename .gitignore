@@ -1,2 +1,4 @@
 config.js
 btc.log
+.vscode/launch.json
+.gitignore

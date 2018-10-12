@@ -21,10 +21,10 @@ var dyn = new AWS.DynamoDB({apiVersion: '2012-08-10'});
 
 var timeoutOrder = 10000;
 var timeoutCheck = 30000;
-var timeoutMonitor = 15000;
 var timeoutConfig = 60000;
 var debug = true;
-var version = 20;
+var version = 21;
+var interval = '1h';
 
 var config = function () {
     var params = {
@@ -44,8 +44,8 @@ var config = function () {
 
             timeoutOrder = parseInt(data.Item.timeoutOrder.N);
             timeoutCheck = parseInt(data.Item.timeoutCheck.N);
-            timeoutMonitor = parseInt(data.Item.timeoutMonitor.N);
             debug = data.Item.debug.BOOL;
+            interval = data.Item.interval.S;
 
             setTimeout(config, timeoutConfig);
 
@@ -458,20 +458,46 @@ var bitbot = function () {
                 coin.trading = false;
                 coin.done = 0;
 
-                var random_boolean = Math.random() >= 0.5;
-                coin.direction = (random_boolean) ? 'bull' : 'bear';;
+                binance.candlesticks(coin.symbol, interval, function(klines) {
 
-                if (coin.direction == 'bull') {
+                    try {
 
-                    coin.trading = true;
-                    doBid();
+                        if (!klines) { throw new Error('Invalid API candlesticks'); }
 
-                } else if (coin.direction == 'bear') {
+                        var open = parseFloat(klines[0][1]);
+                        var close = parseFloat(klines[0][4]);
+                        var change = ((close / open) - 1) * 100;
 
-                    coin.trading = true;
-                    doAsk();
+                        if (change >= 0.15) {
+                            coin.direction = 'bull';
+                        } else if (change <= -0.15) {
+                            coin.direction = 'bear';
+                        } else {
+                            coin.direction = 'neutral';
+                        }
 
-                } 
+                        if (debug) {
+                            log('info', coin.direction + ' ' + change.toFixed(coin.price.tickPlaces));
+                        }
+    
+                        if (coin.direction == 'bull') {
+    
+                            coin.trading = true;
+                            doBid();
+    
+                        } else if (coin.direction == 'bear') {
+    
+                            coin.trading = true;
+                            doAsk();
+    
+                        } 
+    
+                    } catch (error) {
+                        log('error', 'bitbot.candlesticks '+error.message);
+                    }
+
+                }, { 'limit': 1} );
+
             }
 
             setTimeout(bitbot, timeoutCheck);

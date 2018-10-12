@@ -1,4 +1,6 @@
 config.js
+bnb.log
 btc.log
+aws-key.pem
 .vscode/launch.json
 .gitignore
